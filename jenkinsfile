@@ -52,33 +52,45 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
-            steps {
-                sh '''
-                TASK_DEFINITION=$(aws ecs describe-task-definition \
-                  --task-definition ${TASK_DEFINITION_NAME} \
-                  --region ${region})
+ stage('Deploy') {
+    steps {
+        sh '''
+        aws ecs describe-task-definition \
+          --task-definition ${TASK_DEFINITION_NAME} \
+          --region ${region} \
+          --query taskDefinition \
+          > taskdef.json
 
-                NEW_CONTAINER_DEFINITION=$(echo $TASK_DEFINITION | jq \
-                  --arg IMAGE "${ecr_repo_uri}:${VERSION}" \
-                  '.taskDefinition.containerDefinitions[0].image=$IMAGE |
-                   .taskDefinition.containerDefinitions[0]')
+        jq --arg IMAGE "${ecr_repo_uri}:${VERSION}" '
+          .containerDefinitions[0].image = $IMAGE
+          | del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )
+        ' taskdef.json > new-taskdef.json
 
-                aws ecs register-task-definition \
-                  --region ${region} \
-                  --family ${TASK_DEFINITION_NAME} \
-                  --execution-role-arn ${exec_role_arn} \
-                  --container-definitions "[$NEW_CONTAINER_DEFINITION]"
+        NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+          --cli-input-json file://new-taskdef.json \
+          --region ${region} \
+          --query "taskDefinition.taskDefinitionArn" \
+          --output text)
 
-                aws ecs update-service \
-                  --region ${region} \
-                  --cluster ${cluster} \
-                  --service ${SERVICE_NAME} \
-                  --force-new-deployment
-                '''
-            }
-        }
+        echo "Created: $NEW_TASK_DEF_ARN"
+
+        aws ecs update-service \
+          --cluster ${cluster} \
+          --service ${SERVICE_NAME} \
+          --task-definition $NEW_TASK_DEF_ARN \
+          --force-new-deployment \
+          --region ${region}
+        '''
     }
+}
 
     post {
         always {
