@@ -52,25 +52,25 @@ pipeline {
             }
         }
 
- stage('Deploy') {
-    steps {
-        sh '''
-        aws ecs describe-task-definition \
-          --task-definition ${TASK_DEFINITION_NAME} \
-          --region ${region} \
-          --query taskDefinition \
-          > taskdef.json
+        stage('Deploy') {
+            steps {
+                sh '''
+                aws ecs describe-task-definition \
+                --task-definition ${TASK_DEFINITION_NAME} \
+                --region ${region} \
+                --query taskDefinition \
+                > taskdef.json
 
-        jq --arg IMAGE "${ecr_repo_uri}:${VERSION}" '
-          .containerDefinitions[0].image = $IMAGE
-          | del(
-              .taskDefinitionArn,
-              .revision,
-              .status,
-              .requiresAttributes,
-              .compatibilities,
-              .registeredAt,
-              .registeredBy
+                jq --arg IMAGE "${ecr_repo_uri}:${VERSION}" '
+                .containerDefinitions[0].image = $IMAGE
+                | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy
             )
         ' taskdef.json > new-taskdef.json
 
