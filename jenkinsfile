@@ -1,101 +1,88 @@
 pipeline {
-agent any
+    agent any
 
-```
-environment {
-    AWS_SHARED_CREDENTIALS_FILE = "/var/lib/jenkins/.aws/credentials"
-    AWS_CONFIG_FILE             = "/var/lib/jenkins/.aws/config"
+    environment {
 
-    region = "us-east-1"
+        AWS_SHARED_CREDENTIALS_FILE = "/var/lib/jenkins/.aws/credentials"
 
-    ecr_repo_uri = "730335195555.dkr.ecr.us-east-1.amazonaws.com/jenkins"
+        AWS_CONFIG_FILE             = "/var/lib/jenkins/.aws/config"
 
-    cluster = "jenkins-cluster"
+        region = "us-east-1"
 
-    TASK_DEFINITION_NAME = "jenkins-taskdef"
+        ecr_repo_uri = "730335195555.dkr.ecr.us-east-1.amazonaws.com/jenkins"
 
-    SERVICE_NAME = "jenkins-service"
-}
+        cluster = "jenkins-cluster"
 
-stages {
+        TASK_DEFINITION_NAME = "jenkins-taskdef"
 
-    stage('Build') {
-        steps {
+        SERVICE_NAME = "jenkins-service"
 
-            script {
-                def commit_id = sh(
-                    script: 'git rev-parse --short HEAD',
-                    returnStdout: true
-                ).trim()
+        exec_role_arn = "arn:aws:iam::730335195555:role/ecsTaskExecutionRole"
+    }
 
-                env.VERSION = "${BUILD_NUMBER}-${commit_id}"
+    stages {
+
+        stage('Build') {
+            steps {
+                script {
+                    def commit_id = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+
+                    env.VERSION = "${BUILD_NUMBER}-${commit_id}"
+                }
+
+                sh '''
+                aws sts get-caller-identity
+                '''
+
+                sh '''
+                docker build -t ${ecr_repo_uri}:${VERSION} .
+                '''
+
+                sh '''
+                aws ecr get-login-password --region ${region} | \
+                docker login --username AWS --password-stdin 730335195555.dkr.ecr.us-east-1.amazonaws.com
+                '''
+
+                sh '''
+                docker push ${ecr_repo_uri}:${VERSION}
+                '''
             }
+        }
 
-            sh '''
-            aws sts get-caller-identity
-            '''
+        stage('Deploy') {
+            steps {
+                sh '''
+                TASK_DEFINITION=$(aws ecs describe-task-definition \
+                  --task-definition ${TASK_DEFINITION_NAME} \
+                  --region ${region})
 
-            sh '''
-            docker build -t ${ecr_repo_uri}:${VERSION} .
-            '''
+                NEW_CONTAINER_DEFINITION=$(echo $TASK_DEFINITION | jq \
+                  --arg IMAGE "${ecr_repo_uri}:${VERSION}" \
+                  '.taskDefinition.containerDefinitions[0].image=$IMAGE |
+                   .taskDefinition.containerDefinitions[0]')
 
-            sh '''
-            aws ecr get-login-password --region ${region} | \
-            docker login --username AWS --password-stdin 730335195555.dkr.ecr.us-east-1.amazonaws.com
-            '''
+                aws ecs register-task-definition \
+                  --region ${region} \
+                  --family ${TASK_DEFINITION_NAME} \
+                  --execution-role-arn ${exec_role_arn} \
+                  --container-definitions "[$NEW_CONTAINER_DEFINITION]"
 
-            sh '''
-            docker push ${ecr_repo_uri}:${VERSION}
-            '''
+                aws ecs update-service \
+                  --region ${region} \
+                  --cluster ${cluster} \
+                  --service ${SERVICE_NAME} \
+                  --force-new-deployment
+                '''
+            }
         }
     }
 
-    stage('Deploy') {
-        steps {
-
-            sh '''
-            aws ecs describe-task-definition \
-              --task-definition ${TASK_DEFINITION_NAME} \
-              --region ${region} \
-              --query taskDefinition > taskdef.json
-
-            jq --arg IMAGE "${ecr_repo_uri}:${VERSION}" '
-              .containerDefinitions[0].image = $IMAGE
-              | del(
-                  .taskDefinitionArn,
-                  .revision,
-                  .status,
-                  .requiresAttributes,
-                  .compatibilities,
-                  .registeredAt,
-                  .registeredBy
-                )
-            ' taskdef.json > new-taskdef.json
-
-            NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
-                --cli-input-json file://new-taskdef.json \
-                --region ${region} \
-                --query "taskDefinition.taskDefinitionArn" \
-                --output text)
-
-            echo "New Task Definition: $NEW_TASK_DEF_ARN"
-
-            aws ecs update-service \
-                --cluster ${cluster} \
-                --service ${SERVICE_NAME} \
-                --task-definition $NEW_TASK_DEF_ARN \
-                --force-new-deployment \
-                --region ${region}
-            '''
+    post {
+        always {
+            sh 'docker image prune -f || true'
         }
     }
-}
-
-post {
-    always {
-        sh 'docker image prune -f || true'
-    }
-}
-```
-
 }
