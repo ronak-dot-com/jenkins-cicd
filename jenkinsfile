@@ -8,46 +8,40 @@ pipeline
         
         VERSION = "${env.BUILD_ID}-${env.GIT_COMMIT}"
         
-        docker_repo_uri = "387232581030.dkr.ecr.us-east-1.amazonaws.com/jen-ecr"
+        ecr_repo_uri = "730335195555.dkr.ecr.us-east-1.amazonaws.com/jenkins"
        
-        task_def_arn = "arn:aws:ecs:us-east-1:387232581030:task-definition/TASKDEFINITION-LARAVEL:6"
+        task_def_arn = "arn:aws:ecs:us-east-1:730335195555:task-definition/jenkins-taskdef:1"
         
-        cluster = "JEN-ECS"
+        cluster = "jenkins-cluster"
         
-        exec_role_arn = "arn:aws:iam::387232581030:role/ecsTaskExecutionRole"
+        exec_role_arn = "arn:aws:iam::730335195555:role/ecsTaskExecutionRole"
         
-        TASK_DEFINITION_NAME = "TASKDEFINITION-LARAVEL"
+        TASK_DEFINITION_NAME = "jenkins-taskdef"
   
-        SERVICE_NAME = "JEN-SERVICE"
+        SERVICE_NAME = "jenkins-service"
     }
     stages
     {
     stage('Build')
     {
     steps {
-        // Get SHA1 of current commit
         script {
             commit_id = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
         }
-        // Build the Docker image
-        sh "docker build -t ${docker_repo_uri}:${VERSION} ."
-        // Get Docker login credentials for ECR
-        // sh "aws ecr get-login --no-include-email --region ${region} | sh"
-        sh "aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${docker_repo_uri}:${VERSION}"
-        // Push Docker image
-        sh "docker push ${docker_repo_uri}:${VERSION}"
-        // Clean up
-        sh "docker rmi -f ${docker_repo_uri}:${VERSION}"
+        sh "docker build -t ${ecr_repo_uri}:${VERSION} ."
+        sh "aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${ecr_repo_uri}:${VERSION}"
+        sh "docker push ${ecr_repo_uri}:${VERSION}"
+        sh "docker rmi -f ${ecr_repo_uri}:${VERSION}"
         }
     }
     stage('deploy')
     {
     steps{
-        // Get SHA1 of current commit
+       
         script {
             commit_id = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
         }
-        // Deploy to ECS
+        
         sh ''' echo "${docker_repo_uri}:${VERSION}"
 TASK_DEFINITION=$(aws ecs describe-task-definition --task-definition "$TASK_DEFINITION_NAME" --region "${region}")
 NEW_CONTAINER_DEFINTIION=$(echo $TASK_DEFINITION | jq --arg IMAGE "${docker_repo_uri}:${VERSION}" \'.taskDefinition.containerDefinitions[0].image = $IMAGE | .taskDefinition.containerDefinitions[0]\')
