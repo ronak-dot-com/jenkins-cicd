@@ -2,9 +2,7 @@ pipeline {
     agent any
 
     environment {
-
         AWS_SHARED_CREDENTIALS_FILE = "/var/lib/jenkins/.aws/credentials"
-
         AWS_CONFIG_FILE             = "/var/lib/jenkins/.aws/config"
 
         region = "us-east-1"
@@ -16,8 +14,6 @@ pipeline {
         TASK_DEFINITION_NAME = "jenkins-taskdef"
 
         SERVICE_NAME = "jenkins-service"
-
-        exec_role_arn = "arn:aws:iam::730335195555:role/ecsTaskExecutionRole"
     }
 
     stages {
@@ -56,41 +52,42 @@ pipeline {
             steps {
                 sh '''
                 aws ecs describe-task-definition \
-                --task-definition ${TASK_DEFINITION_NAME} \
-                --region ${region} \
-                --query taskDefinition \
-                > taskdef.json
+                  --task-definition ${TASK_DEFINITION_NAME} \
+                  --region ${region} \
+                  --query taskDefinition \
+                  > taskdef.json
 
                 jq --arg IMAGE "${ecr_repo_uri}:${VERSION}" '
-                .containerDefinitions[0].image = $IMAGE
-                | del(
-                .taskDefinitionArn,
-                .revision,
-                .status,
-                .requiresAttributes,
-                .compatibilities,
-                .registeredAt,
-                .registeredBy
-            )
-        ' taskdef.json > new-taskdef.json
+                  .containerDefinitions[0].image = $IMAGE
+                  | del(
+                      .taskDefinitionArn,
+                      .revision,
+                      .status,
+                      .requiresAttributes,
+                      .compatibilities,
+                      .registeredAt,
+                      .registeredBy
+                    )
+                ' taskdef.json > new-taskdef.json
 
-        NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
-          --cli-input-json file://new-taskdef.json \
-          --region ${region} \
-          --query "taskDefinition.taskDefinitionArn" \
-          --output text)
+                NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+                  --cli-input-json file://new-taskdef.json \
+                  --region ${region} \
+                  --query "taskDefinition.taskDefinitionArn" \
+                  --output text)
 
-        echo "Created: $NEW_TASK_DEF_ARN"
+                echo "Created: $NEW_TASK_DEF_ARN"
 
-        aws ecs update-service \
-          --cluster ${cluster} \
-          --service ${SERVICE_NAME} \
-          --task-definition $NEW_TASK_DEF_ARN \
-          --force-new-deployment \
-          --region ${region}
-        '''
+                aws ecs update-service \
+                  --cluster ${cluster} \
+                  --service ${SERVICE_NAME} \
+                  --task-definition $NEW_TASK_DEF_ARN \
+                  --force-new-deployment \
+                  --region ${region}
+                '''
+            }
+        }
     }
-}
 
     post {
         always {
